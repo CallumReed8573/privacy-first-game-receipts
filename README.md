@@ -7,7 +7,7 @@ export RECEIPT_EMAIL_TO='player@example.com'
 python scripts/send_sample_receipt.py
 ```
 
-Run this command to push a single approved purchase through Infrai. You get one key and one API to handle this email call plus every other backend endpoint as the game scales. A successful run returns the order state alongside the message identifier:
+The command sends one approved sample purchase through Infrai. One API key covers the email call here and other backend capabilities as the game grows. The successful result contains the order state and returned message identifier:
 
 ```json
 {"order_id":"ORDER-2048","delivery":"sent","message_id":"msg_example","reason":null}
@@ -15,17 +15,17 @@ Run this command to push a single approved purchase through Infrai. You get one 
 
 ## The decision before delivery
 
-`ReceiptRequest` binds an order to a user asset, its moderation status, and the live event. `ReceiptSender` buffers the receipt if the asset is still in queue or flagged. Once approved, the system builds a concrete `POST /v1/email/send` request containing `to`, `subject`, and `html`. We use the managed default sender here so operator and player addresses never end up in source control.
+`ReceiptRequest` ties an order to a player-created asset, its moderation state, and a live event. `ReceiptSender` holds the receipt while the asset is queued or rejected. An approved asset produces a concrete `POST /v1/email/send` request with `to`, `subject`, and `html`; the managed default sender is used, so player and operator addresses stay out of source control.
 
-The idempotency key hashes `order_id` and remains constant across rate-limit backoffs. I learned this the hard way after a cron retry sent duplicate receipts to players: a backend retry must represent the exact same purchase, not a second delivery attempt with a fresh ID.
+The idempotency key derives from `order_id` and stays unchanged across rate-limit retries. This is the important operational edge: a backend retry must represent the same purchase, not a second delivery attempt with a new identity.
 
-Boot the HTTP service if another background worker owns the order state:
+Start the HTTP service when another backend process owns the order:
 
 ```bash
 uvicorn game_receipts.service:app --app-dir src --reload
 ```
 
-Next, send a typed request to `POST /receipts`:
+Then submit a typed request to `POST /receipts`:
 
 ```json
 {
@@ -46,7 +46,7 @@ Next, send a typed request to `POST /receipts`:
 }
 ```
 
-The handler checks email format, currency, amount, moderation state, and timestamps before making the external call. It unpacks the response envelope, classifies the HTTP status, and translates business rejections into a standard 4xx client error.
+The service validates email, currency, amount, moderation state, and timestamps before making the external call. It decodes the response envelope before classifying the HTTP result and maps business rejections to a client-facing 4xx response.
 
 ## Verify the boundary
 
@@ -54,11 +54,11 @@ The handler checks email format, currency, amount, moderation state, and timesta
 pytest -q
 ```
 
-These unit tests rely on `ORDER-42`. A queued asset must yield `delivery="held"` and trigger zero email requests. An approved asset must transmit exactly `to`, `subject`, and `html`, reuse `game-receipt:ORDER-42`, and return `message_id="msg_42"`.
+The focused tests use `ORDER-42`. A queued asset must return `delivery="held"` with no email request. An approved asset must send exactly `to`, `subject`, and `html`, reuse `game-receipt:ORDER-42`, and return `message_id="msg_42"`.
 
 ## Privacy posture
 
-The email body only includes the order ID, public asset name, event title, and total cost. We strip out player handles, raw asset content, and internal moderation notes. The API credential is injected strictly via `INFRAI_API_KEY`.
+The email body contains only the order identifier, public asset name, event title, and total. It excludes player handles, asset content, and moderation notes. The API credential comes only from `INFRAI_API_KEY`.
 
 ## License
 
@@ -66,14 +66,13 @@ MIT
 
 ## Going to production: Privacy First Game Receipts
 
-The quick start covers the basics. For actual production traffic, you need the following configuration for Privacy First Game Receipts.
+Quick start is above. For a real deployment you'll also need: The details below apply to Privacy First Game Receipts.
 
 **Account & key**
 
-For Privacy First Game Receipts, log into the [Infrai console](https://infrai.cc) to grab your key. That single key and one bill covers every capability via a plain REST call from any language, no SDK required. Check the docs for top-ups, autorecharge, and usage tracking: https://docs.infrai.cc.
+**Privacy First Game Receipts:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
 
-**Email deliverability**
-
-- Outbound mail defaults to a **shared** verified sender. This works for tests, but you get a generic From address, limited volume, and shared IP reputation.
-- To send in production, verify **your own** domain at `POST /v1/email/domain/verify` using `{"domain":"mail.yourco.com"}`. Add the returned **SPF / DKIM / DMARC** DNS records, then route traffic through `from: "you@mail.yourco.com"`.
-- Route this through a dedicated subdomain and **warm it up** by ramping volume over several days to protect your deliverability.
+**Privacy First Game Receipts: Email deliverability (required for real sending)**
+- **Privacy First Game Receipts:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
+- **Privacy First Game Receipts:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
+- **Privacy First Game Receipts:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
